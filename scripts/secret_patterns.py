@@ -92,6 +92,15 @@ def _home():
     """Computed lazily so test/CI can override HOME before path checks run."""
     return os.path.abspath(os.path.expanduser("~"))
 
+
+def _norm_path(tok, home=None):
+    base = home if home is not None else _home()
+    if tok.startswith("$HOME"):
+        tok = base + tok[5:]
+    elif tok.startswith("~"):
+        tok = base + tok[1:]
+    return os.path.abspath(tok)
+
 # Matched against the expanded, normalized (abspath) path.
 def _sensitive_path_regex():
     home = _home()
@@ -123,11 +132,6 @@ def _sensitive_path_regex():
 def sensitive_path_re():
     """Per-call regex so tests can override os.environ['HOME'] between calls."""
     return _sensitive_path_regex()
-
-
-# Backwards compat: previous code referenced .SENSITIVE_PATH as a compiled
-# pattern. Keep module attr for compatibility with older guard versions.
-SENSITIVE_PATH = _sensitive_path_regex()
 
 # A pipeline containing one of these prints env var NAMES only, not values.
 NAMES_ONLY_FILTER = re.compile(
@@ -185,14 +189,6 @@ def _resolve_tilde(path, home):
     if path.startswith("$HOME"):
         return home + path[5:]
     return path
-
-
-def _norm_path(tok):
-    if tok.startswith("$HOME"):
-        tok = _HOME + tok[5:]
-    elif tok.startswith("~"):
-        tok = _HOME + tok[1:]
-    return os.path.abspath(tok)
 
 
 def references_sensitive_path(cmd):

@@ -98,7 +98,7 @@ class ExecGeneric(unittest.TestCase):
     # 1. path-based detection
     def test_py_open_opencodex(self):
         self.check('python3 -c "import json; d=json.load(open(\''
-                   "/Users/studio/.opencodex/config.json'))\"", "block")
+                   '" + os.path.expanduser("~/.opencodex/config.json") + '"\'))\"", "block")
     def test_cat_pi_models(self):
         self.check("cat ~/.pi/agent/models.json | head", "block")
     def test_grep_zshrc_chain(self):
