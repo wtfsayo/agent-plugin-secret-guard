@@ -1,0 +1,26 @@
+{
+  "PreToolUse": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python3 ${plugin.dir}/scripts/secret_guard.py",
+          "timeout": 10
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python3 ${plugin.dir}/scripts/secret_guard.py",
+          "timeout": 10
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "secret-guard",
+  "version": "1.0.0",
+  "description": "Plugin for CLI agents — credential leak prevention via PreToolUse + PostToolUse hooks that block secret-leaking commands (cat .env, op --reveal, aws secretsmanager, gh auth token, kubectl secrets) and warn on output that already leaked. Works with Droid, Devin, Claude Code, opencode, Grok, Cursor, and Codex.",
+  "author": {
+    "name": "Sayo",
+    "url": "https://github.com/wtfsayo"
+  },
+  "keywords": [
+    "secrets",
+    "secret-leaking",
+    "credential-guard",
+    "api-key-safety",
+    "agent-security",
+    "agent-hooks",
+    "pretooluse",
+    "posttooluse",
+    "claude-code",
+    "devin-cli",
+    "opencode",
+    "grok-cli",
+    "cursor",
+    "codex-cli",
+    "factory-droid",
+    "aws-secretsmanager",
+    "1password",
+    "vault",
+    "dotenv-protection",
+    "ai-agent-security"
+  ],
+  "license": "MIT",
+  "repository": "https://github.com/wtfsayo/agent-plugin-secret-guard",
+  "extensions": {
+    "com.devin.hooks": {
+      "hooks_config": "extensions/com.devin.hooks/hooks.json",
+      "install_dir": "~/.config/devin/hooks"
+    },
+    "com.factory.droid": {
+      "hooks_config": "extensions/com.factory.droid/hooks.json",
+      "install_dir": "~/.config/droid/hooks"
+    },
+    "com.anthropic.claude": {
+      "settings_snippet": "extensions/com.anthropic.claude/hooks.settings.json",
+      "install_dir": "~/.claude/hooks",
+      "merge_into": "~/.claude/settings.json"
+    },
+    "ai.opencode": {
+      "plugin_module": "extensions/ai.opencode/plugin/secret-guard.ts",
+      "install_dir": "~/.config/opencode/plugin",
+      "merge_into": "~/.config/opencode/opencode.json"
+    },
+    "ai.xai.grok": {
+      "install_dir": "~/.grok/hooks",
+      "hook_file": "secret-guard.json",
+      "tool_matchers": "Bash|run_terminal_command|Shell|Read|Write|Edit|MultiEdit"
+    }
+  }
+}

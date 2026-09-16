@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""redacted-cat — print files with secret values masked.
+
+Usage: redacted-cat FILE [FILE...] [-n START,END]
+Reads stdin when no FILE is given. Every high- and medium-confidence
+secret value is replaced with <redacted:KIND:len=N>; on KEY=value lines
+the key is kept and only the value is masked.
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import secret_patterns as sp
+
+# ponytail: reuse the module's compiled patterns instead of recompiling the
+# same source strings.
+_PATTERNS = sp._HIGH + sp._MED
+
+
+def _slice_range(text, rng):
+    if rng:
+        return "".join(text.splitlines(keepends=True)[rng[0] - 1:rng[1]])
+    return text
+
+
+def redact(text):
+    def sub(m, name):
+        val = m.group(1) if m.lastindex else m.group(0)
+        if not sp._accept(name, val):
+            return m.group(0)
+        return m.group(0).replace(val, f"<redacted:{name}:len={len(val)}>", 1)
+
+    for name, rx in _PATTERNS:
+        text = rx.sub(lambda m: sub(m, name), text)
+    return text
+
+
+def main():
+    args = sys.argv[1:]
+    line_range = None
+    if "-n" in args:
+        i = args.index("-n")
+        args.pop(i)
+        spec = args.pop(i)
+        try:
+            a, b = spec.split(",")
+            line_range = (int(a), int(b))
+        except ValueError:
+            print("redacted-cat: -n expects START,END", file=sys.stderr)
+            sys.exit(1)
+
+    if not args:
+        sys.stdout.write(redact(_slice_range(sys.stdin.read(), line_range)))
+        return
+
+    for path in args:
+        if not os.path.isfile(path):
+            print(f"redacted-cat: {path}: no such file", file=sys.stderr)
+            sys.exit(1)
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError as e:
+            print(f"redacted-cat: {path}: {e}", file=sys.stderr)
+            sys.exit(1)
+        text = _slice_range(text, line_range)
+        if len(args) > 1:
+            print(f"===== {path} =====")
+        sys.stdout.write(redact(text))
+
+
+if __name__ == "__main__":
+    main()

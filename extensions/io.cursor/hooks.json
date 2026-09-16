@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/secret_guard.py",
+        "matcher": ".*",
+        "timeout": 10
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/secret_guard.py",
+        "matcher": ".*",
+        "timeout": 10
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/secret_guard.py",
+        "timeout": 10
+      }
+    ],
+    "beforeReadFile": [
+      {
+        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/secret_guard.py",
+        "timeout": 10
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/secret_guard.py",
+        "timeout": 10
+      }
+    ]
+  }
+}
