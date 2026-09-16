@@ -1,0 +1,31 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "secret-guard",
+  "version": "1.0.0",
+  "description": "Pre/PostToolUse hooks + helper CLIs that keep secret values (API keys, passwords, tokens, connection-string passwords) out of agent sessions. Blocks leaky commands before they run, warns on output that already leaked, ships masked-read helpers (secret-fetch, redacted-cat) for inspecting credential stores safely.",
+  "author": {
+    "name": "Sayo",
+    "url": "https://github.com/wtfsayo"
+  },
+  "keywords": [
+    "secrets",
+    "security",
+    "hooks",
+    "guardrails",
+    "credentials",
+    "op",
+    "aws-secretsmanager"
+  ],
+  "license": "MIT",
+  "repository": "https://github.com/wtfsayo/agent-plugin-secret-guard",
+  "extensions": {
+    "com.devin.hooks": {
+      "hooks_config": "extensions/com.devin.hooks/hooks.json",
+      "install_dir": "~/.config/devin/hooks"
+    },
+    "com.factory.droid": {
+      "hooks_config": "extensions/com.factory.droid/hooks.json",
+      "install_dir": "~/.config/droid/hooks"
+    }
+  }
+}
