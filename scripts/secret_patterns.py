@@ -57,42 +57,77 @@ MEDIUM_CONFIDENCE = [
 
 _HIGH = [(n, re.compile(p)) for n, p in HIGH_CONFIDENCE]
 _MED = [(n, re.compile(p)) for n, p in MEDIUM_CONFIDENCE]
+
+# Gitleaks rules that fire on ambient code (env-var reads, describe-secret
+# calls, config-file hydration) rather than literals — quarantined so the
+# curated and other gitleaks rules still trigger.
+_GITLEAKS_QUARANTINE = frozenset({
+    "generic-api-key",
+    "sidekiq-sensitive-url",
+    "curl-auth-header",
+    "curl-auth-user",
+    "jwt",
+    "jwt-base64",
+    "kubernetes-secret-yaml",
+    "nuget-config-password",
+})
+
+import warnings as _warnings
+
 _GITLEAKS_COMPILED = []
 for _n, _p in _GITLEAKS:
+    if _n in _GITLEAKS_QUARANTINE:
+        continue
     try:
-        _GITLEAKS_COMPILED.append((_n, re.compile(_p)))
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("ignore", FutureWarning)
+            _GITLEAKS_COMPILED.append((_n, re.compile(_p)))
     except re.error:
         pass
 
 # Placeholder / example values to skip
 PLACEHOLDER = re.compile(r"(?i)(your[_-]?|example|placeholder|xxx+|redacted|<[^>]+>|\$\{|\.\.\.|changeme|dummy|test_?key|test[-_]?token|fake|sample|mock|lorem|deadbeef|sk-ant-api03-\.\.\.|0x0{20,}|0x1{20,}|abcdef0123|1234567890abcdef|0123456789abcdef)")
 
-_HOME = os.path.abspath(os.path.expanduser("~"))
+def _home():
+    """Computed lazily so test/CI can override HOME before path checks run."""
+    return os.path.abspath(os.path.expanduser("~"))
 
 # Matched against the expanded, normalized (abspath) path.
-SENSITIVE_PATH = re.compile(
-    r"(?:"
-    r"\.env(?:\.(?!example$|sample$|template$|test$)[^/]*)?$"           # .env, .env.* (minus safe suffixes)
-    r"|" + re.escape(_HOME) + r"/\.(?:zshrc|zshenv|zprofile|bashrc|bash_profile|profile)$"
-    r"|" + re.escape(_HOME) + r"/\.ssh/(?!config$|known_hosts)[^/]+$"   # ~/.ssh/* except config, known_hosts*
-    r"|" + re.escape(_HOME) + r"/\.aws/credentials$"
-    r"|" + re.escape(_HOME) + r"/\.(?:netrc|npmrc|pypirc|git-credentials)$"
-    r"|" + re.escape(_HOME) + r"/\.(?:zsh_history|bash_history|python_history)$"
-    r"|" + re.escape(_HOME) + r"/\.docker/config\.json$"
-    r"|" + re.escape(_HOME) + r"/\.config/gh/hosts\.yml$"
-    r"|" + re.escape(_HOME) + r"/\.cursor/mcp\.json$"
-    r"|" + re.escape(_HOME) + r"/\.claude\.json$"
-    r"|" + re.escape(_HOME) + r"/\.opencodex/config\.json$"
-    r"|" + re.escape(_HOME) + r"/\.pi/agent/models\.json$"
-    r"|" + re.escape(_HOME) + r"/\.hermes/"
-    r"|\.(?:pem|key|p12|pfx)$"
-    r"|(?:^|/)id_(?:rsa|ed25519)"
-    r"|keypair[^/]*\.json$"
-    r"|/(?:credentials|auth|secrets)\.json$"
-    r"|/\.git-credentials$"
-    r"|\.secrets\.[^/]+$"
-    r")"
-)
+def _sensitive_path_regex():
+    home = _home()
+    return re.compile(
+        r"(?:"
+        r"\.env(?:\.(?!example$|sample$|template$|test$)[^/]*)?$"
+        r"|" + re.escape(home) + r"/\.(?:zshrc|zshenv|zprofile|bashrc|bash_profile|profile)$"
+        r"|" + re.escape(home) + r"/\.ssh/(?!config$|known_hosts)[^/]+$"
+        r"|" + re.escape(home) + r"/\.aws/credentials$"
+        r"|" + re.escape(home) + r"/\.(?:netrc|npmrc|pypirc|git-credentials)$"
+        r"|" + re.escape(home) + r"/\.(?:zsh_history|bash_history|python_history)$"
+        r"|" + re.escape(home) + r"/\.docker/config\.json$"
+        r"|" + re.escape(home) + r"/\.config/gh/hosts\.yml$"
+        r"|" + re.escape(home) + r"/\.cursor/mcp\.json$"
+        r"|" + re.escape(home) + r"/\.claude\.json$"
+        r"|" + re.escape(home) + r"/\.opencodex/config\.json$"
+        r"|" + re.escape(home) + r"/\.pi/agent/models\.json$"
+        r"|" + re.escape(home) + r"/\.hermes/"
+        r"|\.(?:pem|key|p12|pfx)$"
+        r"|(?:^|/)id_(?:rsa|ed25519)"
+        r"|keypair[^/]*\.json$"
+        r"|/(?:credentials|auth|secrets)\.json$"
+        r"|/\.git-credentials$"
+        r"|\.secrets\.[^/]+$"
+        r")"
+    )
+
+
+def sensitive_path_re():
+    """Per-call regex so tests can override os.environ['HOME'] between calls."""
+    return _sensitive_path_regex()
+
+
+# Backwards compat: previous code referenced .SENSITIVE_PATH as a compiled
+# pattern. Keep module attr for compatibility with older guard versions.
+SENSITIVE_PATH = _sensitive_path_regex()
 
 # A pipeline containing one of these prints env var NAMES only, not values.
 NAMES_ONLY_FILTER = re.compile(
@@ -142,6 +177,16 @@ _PATH_TOKEN = re.compile(
 )
 
 
+def _resolve_tilde(path, home):
+    """Expand `~` / `$HOME` against a possibly-overridden HOME. Minus the
+    os.path.expanduser call sites so tests that set HOME behave correctly."""
+    if path.startswith("~/"):
+        return home + path[1:]
+    if path.startswith("$HOME"):
+        return home + path[5:]
+    return path
+
+
 def _norm_path(tok):
     if tok.startswith("$HOME"):
         tok = _HOME + tok[5:]
@@ -152,11 +197,14 @@ def _norm_path(tok):
 
 def references_sensitive_path(cmd):
     """True when a content-reading verb and a sensitive path share a segment."""
+    sen = _sensitive_path_regex()
+    home = _home()
     for seg in re.split(r";|&&|\|\||\n", cmd):
         if not _CONTENT_VERB.search(seg):
             continue
         for m in _PATH_TOKEN.finditer(seg):
-            if SENSITIVE_PATH.search(_norm_path(m.group(0))):
+            resolved = _resolve_tilde(m.group(0), home)
+            if sen.search(_norm_path(resolved)):
                 return True
     return False
 

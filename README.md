@@ -18,9 +18,9 @@ plugin.json
 ├── skills/secret-guard/SKILL.md       # behavioral instructions when hooks aren't available
 ├── scripts/
 │   ├── secret_guard.py                # the Pre/PostToolUse hook itself
-│   ├── secret_patterns.py             # regex bank: GitHub/Slack/AWS/Google/OpenAI/Anthropic/Stripe/SendGrid/…
-│   │                                    plus PopPay- and Cross-Switch-specific prefixes (pp_sk_*, CS_*,
-│   │                                    paywall_secret_key=, URL-embedded credentials)
+│   ├── secret_patterns.py             # curated patterns + names-only env + custom org prefixes
+│   ├── gitleaks_patterns.py           # auto-generated: 221 OSS rules from gitleaks/gitleaks
+│   ├── sync_gitleaks.py               # re-sync gitleaks.toml → refresh gitleaks_patterns.py
 │   ├── secret-fetch                   # `op item` + `aws secretsmanager` masked inspector
 │   └── redacted-cat                   # file printer that replaces secrets with <redacted:…>
 ├── install.sh                         # installs scripts + optional hooks.json into a config dir

@@ -10,7 +10,7 @@ import sys
 import tempfile
 import unittest
 
-HOOKS = "/Users/studio/.config/droid/hooks"
+HOOKS = os.path.dirname(os.path.abspath(__file__)) + "/../scripts"
 GUARD = os.path.join(HOOKS, "secret_guard.py")
 FETCH = os.path.join(HOOKS, "secret-fetch")
 RCAT = os.path.join(HOOKS, "redacted-cat")

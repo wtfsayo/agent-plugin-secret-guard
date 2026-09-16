@@ -23,14 +23,20 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import secret_patterns as sp
 
-LOG = os.path.expanduser("~/.config/droid/hooks/secret_guard.log")
-HELPERS = "~/.config/droid/hooks"
+def _install_dir():
+    """Hooks dir this script lives under — same for droid/devin/plugin installs."""
+    return os.path.abspath(os.path.dirname(__file__))
+
+
+LOG = os.path.join(_install_dir(), "secret_guard.log")
+HELPERS = _install_dir()
 
 # Helper invocations are stripped segment-by-segment before checking, so a
-# helper call can't whitewash a leaky command chained after it.
+# helper call can't whitewash a leaky command chained after it. Match the
+# tools by basename so any install location works (default ~/.config/{droid,
+# devin}/hooks, a plugin-installed dir, or a custom path).
 HELPER_SEG = re.compile(
-    r"(^|[;&|\n]\s*)(?:(?:/Users/studio|~|\$HOME)/\.config/(?:droid|devin)/hooks/)?"
-    r"(?:secret-fetch|redacted-cat)\b[^;&|\n]*"
+    r"(^|[;&|\n]\s*)(?:[\w./~-]*/)?(?:secret-fetch|redacted-cat)\b[^;&|\n]*"
 )
 
 LEAKY_REASON = (
@@ -67,12 +73,39 @@ def scan_lines_for_secrets(text):
     return kinds, lines, n
 
 
+# Canonical tool names across clients. Droid uses Execute/Read/Create/Edit;
+# Cursor/Grok Bot use Shell/Write; Devin uses shell commands + fs.write/abs_path.
+# We treat each canonical family the same way regardless of client spelling.
+_SHELL_TOOLS = frozenset({
+    "Execute", "write_to_process",
+    "Shell", "run_terminal_command", "terminal", "exec",
+    "shell", "bash", "sh",
+})
+_FILE_READ_TOOLS = frozenset({
+    "Read", "read_file",
+})
+_FILE_WRITE_TOOLS = frozenset({
+    "Create", "Write", "str_replace_editor", "fs_write", "write_file",
+    "apply_patch", "Edit", "MultiEdit",
+})
+
+
+def _tool_family(tool):
+    if tool in _SHELL_TOOLS:
+        return "shell"
+    if tool in _FILE_READ_TOOLS:
+        return "read"
+    if tool in _FILE_WRITE_TOOLS:
+        return "write"
+    return None
+
+
 def pre_tool_use(data):
     tool = data.get("tool_name") or ""
     ti = data.get("tool_input") or {}
+    family = _tool_family(tool)
 
-    # Droid shell tool. Also cover write_to_process-style text input if present.
-    if tool in ("Execute", "write_to_process"):
+    if family == "shell":
         cmd = ti.get("command") or ti.get("text_input") or ""
         cmd = HELPER_SEG.sub(lambda m: m.group(1), cmd)
         if not cmd.strip(" ;&|\n"):
@@ -93,10 +126,10 @@ def pre_tool_use(data):
             )
         return
 
-    if tool == "Read":
+    if family == "read":
         path = ti.get("file_path") or ""
         norm = os.path.abspath(os.path.expanduser(path))
-        if sp.SENSITIVE_PATH.search(norm):
+        if sp.sensitive_path_re().search(norm):
             block(
                 "Blocked: this path may contain secrets. View it with "
                 f"`{HELPERS}/redacted-cat <file>` (masks values) "
@@ -120,14 +153,18 @@ def pre_tool_use(data):
             )
         return
 
-    if tool in ("Create", "Edit", "ApplyPatch"):
+    if family == "write":
         if tool == "ApplyPatch":
             text = json.dumps(ti, ensure_ascii=False)
         else:
-            # Create uses `content`; Edit uses `new_str` (Droid) / `new_string`.
+            # Create uses `content`; Edit uses `new_str`/`new_string`;
+            # str_replace_editor/fs_write use `new_str`/`new_content`/`content`.
             text = "\n".join(
                 str(ti.get(k) or "")
-                for k in ("content", "new_str", "new_string", "new_source")
+                for k in (
+                    "content", "new_str", "new_string", "new_source",
+                    "new_content", "file_text", "patch",
+                )
             )
         hits = sp.find_secrets(text, include_medium=True)
         if hits:

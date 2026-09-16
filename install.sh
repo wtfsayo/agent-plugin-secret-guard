@@ -18,9 +18,10 @@ case "$TARGET" in
 esac
 
 mkdir -p "$DEST"
+mkdir -p "$DEST/tests"
 cp -p "$PLUGIN_DIR"/scripts/* "$DEST"/
-cp -p "$PLUGIN_DIR"/tests/test_secret_guard.py "$DEST"/tests/ 2>/dev/null || mkdir -p "$DEST/tests" && cp -p "$PLUGIN_DIR"/tests/test_secret_guard.py "$DEST/tests/"
-chmod +x "$DEST"/secret_guard.py "$DEST"/secret-fetch "$DEST"/redacted-cat
+cp -p "$PLUGIN_DIR"/tests/test_secret_guard.py "$DEST"/tests/
+chmod +x "$DEST"/secret_guard.py "$DEST"/secret-fetch "$DEST"/redacted-cat "$DEST"/sync_gitleaks.py
 
 HOOKS_JSON="$(dirname "$DEST")/hooks.json"
 if [ ! -f "$HOOKS_JSON" ]; then
