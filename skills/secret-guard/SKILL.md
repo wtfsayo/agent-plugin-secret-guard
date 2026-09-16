@@ -71,7 +71,7 @@ op run --env-file ./env.tpl -- ./script              # injects op://refs as env 
 
 Before any final answer that reports on values retrieved earlier:
 
-1. Scan the message for secret-shaped strings: `*_key=`, `password=`, `secret=`, `token=`, `Authorization:`, `Bearer `, `sk-_`, `pp_sk_`, `xox-`, `ghp_`, `AIza`, `AKIA`, `whsec_`, `-----BEGIN`, or URL segments carrying a `user:pass@` credential.
+1. Scan the message for secret-shaped strings: `*_key=`, `password=`, `secret=`, `token=`, `Authorization:`, `Bearer `, `sk-_`, `xox-`, `ghp_`, `AIza`, `AKIA`, `whsec_`, `-----BEGIN`, or URL segments carrying a `user:pass@` credential.
 2. If a literal value slipped out in an earlier tool result, do NOT restate it — refer to it by variable name, `'<redacted>'`, or "the secret we stored earlier."
 3. If a value is printed length/prefix only, say so (`stored len=54, first3=whs…`; never the whole first N/last N where N>6).
 

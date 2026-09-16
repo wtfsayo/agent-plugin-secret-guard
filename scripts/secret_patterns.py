@@ -37,13 +37,6 @@ HIGH_CONFIDENCE = [
     ("supabase_jwt",      r"\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"),
     ("private_key_block", r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY(?: BLOCK)?-----"),
     ("db_url_with_pw",    r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^\s:/@'\"]+:[^\s@'\"]{4,}@[^\s'\"]+"),
-    # PopPay / Cross-Switch credentials (sandbox + production). Prefixes seen in
-    # 1Password + backend envs; intentional so pp_sk_sbx_* / pp_live_* / CS_* can't
-    # slip through the generic prefix list.
-    ("poppay_api_key",    r"\bpp_sk_(?:sbx|live)_[A-Za-z0-9]{20,}"),
-    ("poppay_key",        r"\bpp_(?:sbx|live)_key_[A-Za-z0-9\\-]{20,}"),
-    ("cross_switch_caller",r"\bCS_[A-Z][A-Za-z0-9_\-]{10,}"),
-    ("paywall_secret",    r"\bpaywall_secret_key\s*[=:\"']\s*([^\s\"',]{10,})"),
     ("generic_url_password", r"\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s:/@'\")]+:[^\s@'\")]{8,}@[^\s'\")]+"),
     ("eth_private_key",   r"\b0x[a-fA-F0-9]{64}\b"),
     ("solana_b58_key",    r"\b[1-9A-HJ-NP-Za-km-z]{87,88}\b"),

@@ -44,7 +44,6 @@ cd agent-plugin-secret-guard
 | Source | Patterns |
 |---|---|
 | Vendor tokens | `sk-`, `sk-ant-`, `ghp|gho|ghu|ghs|ghr_`, `github_pat_`, `xox[abprs]-`, `AKIA|ASIA`, `AIza`, `glpat-`, `npm_`, `pypi-`, `hf_`, `sk/pk/rk_(live|test)_`, `whsec_`, `SG.`, `AC`, telegram, vercel_, discord, JWT-looking supabase, private-key blocks |
-| PopPay / Cross-Switch | `pp_sk_(sbx|live)_*`, `pp_(sbx|live)_key_*`, `CS_[A-Za-z0-9_-]+` (APICaller-derived), `paywall_secret_key=` |
 | DB URIs | `postgres|mysql|mongodb|redis|amqp` URIs with an embedded `user:pass@` segment |
 | Generic | `*_API_KEY=*`, `*_SECRET=*`, `*_TOKEN=*`, `*_PASSWORD=*`, `bearer_token=` (with entropy filter) |
 | Sensitive files | `.env` (not `.env.example/sample/template/test`), `~/.ssh/*` sans `config`/`known_hosts`, `~/.aws/credentials`, `~/.netrc`, `~/.zsh_history`, `~/.bash_history`, `~/.git-credentials`, `*.credentials.json`, `*.secrets.*`, `id_rsa`/`id_ed25519` private keys |
@@ -57,7 +56,7 @@ The blocking behavior:
 
 ## Customizing for your org
 
-Add org-specific prefixes to `scripts/secret_patterns.py` in `HIGH_CONFIDENCE` — one line per `(name, regex)` tuple. The ones already there (`poppay_api_key`, `cross_switch_caller`, `poppay_key`, `paywall_secret`, `generic_url_password`) are examples you can seed from. For anything that slipped before the guard existed, `redacted-cat` is the escape hatch.
+Add org-specific prefixes to `scripts/secret_patterns.py` in `HIGH_CONFIDENCE` — one line per `(name, regex)` tuple. Add any vendor prefixes your org uses as `(name, regex)` tuples. For anything that slipped before the guard existed, `redacted-cat` is the escape hatch.
 
 ## Disable
 
