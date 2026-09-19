@@ -18,8 +18,9 @@ case "$TARGET" in
   grok)     DEST="${GROK_HOOKS_DIR:-$HOME/.grok/hooks}" ;;
   cursor)   DEST="${CURSOR_HOOKS_DIR:-$HOME/.cursor/hooks}"; CURSOR_CFG="${CURSOR_CFG:-$HOME/.cursor/hooks.json}" ;;
   codex)    DEST="${CODEX_HOOKS_DIR:-$HOME/.codex/hooks}"; CODEX_CFG="${CODEX_CFG:-$HOME/.codex/hooks.json}" ;;
+  omp)      DEST="${OMP_HOOKS_DIR:-$HOME/.omp/agent/hooks}" ;;
   /*|./*)   DEST="$TARGET" ;;
-  *)        echo "unknown target: $TARGET (use droid|devin|claude|opencode|grok|cursor|codex|/path)" >&2; exit 2 ;;
+  *)        echo "unknown target: $TARGET (use droid|devin|claude|opencode|grok|cursor|codex|omp|/path)" >&2; exit 2 ;;
 esac
 
 mkdir -p "$DEST/scripts" "$DEST/tests"
@@ -156,6 +157,15 @@ print("codex: hooks need one-time trust review — run codex and accept the prom
 PYEOF
     fi
     ;;
+  omp)
+    # omp discovers hook factories only in hooks/pre|post/*.ts; the Python
+    # core stays in hooks/scripts/ (discovery is non-recursive, so it is
+    # never picked up as a hook). The adapter resolves it via ../scripts/.
+    mkdir -p "$DEST/pre"
+    cp -p "$PLUGIN_DIR/extensions/dev.omp/secret-guard.ts" "$DEST/pre/secret-guard.ts"
+    echo "omp: installed $DEST/pre/secret-guard.ts (core in $DEST/scripts/)"
+    echo "omp: disable with OMP_SECRET_GUARD=off"
+    ;;
   droid|devin|/*|./*)
     ;;
 esac
@@ -224,7 +234,7 @@ json.dump(data, open(path, "w"), indent=2)
 print(f"merged secret-guard into {path}")
 PYEOF
   fi
-elif [ "$TARGET" != "claude" ] && [ "$TARGET" != "opencode" ] && [ "$TARGET" != "cursor" ] && [ "$TARGET" != "codex" ]; then
+elif [ "$TARGET" != "claude" ] && [ "$TARGET" != "opencode" ] && [ "$TARGET" != "cursor" ] && [ "$TARGET" != "codex" ] && [ "$TARGET" != "omp" ]; then
   HOOKS_JSON="$(dirname "$DEST")/hooks.json"
   if [ ! -f "$HOOKS_JSON" ]; then
     cat > "$HOOKS_JSON" <<EOF

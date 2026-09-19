@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "secret-guard",
   "version": "1.0.0",
-  "description": "Plugin for CLI agents — credential leak prevention via PreToolUse + PostToolUse hooks that block secret-leaking commands (cat .env, op --reveal, aws secretsmanager, gh auth token, kubectl secrets) and warn on output that already leaked. Works with Droid, Devin, Claude Code, opencode, Grok, Cursor, and Codex.",
+  "description": "Plugin for CLI agents \u2014 credential leak prevention via PreToolUse + PostToolUse hooks that block secret-leaking commands (cat .env, op --reveal, aws secretsmanager, gh auth token, kubectl secrets) and warn on output that already leaked. Works with Droid, Devin, Claude Code, opencode, Grok, Cursor, Codex, and omp.",
   "author": {
     "name": "Sayo",
     "url": "https://github.com/wtfsayo"
@@ -27,7 +27,8 @@
     "1password",
     "vault",
     "dotenv-protection",
-    "ai-agent-security"
+    "ai-agent-security",
+    "oh-my-pi"
   ],
   "license": "MIT",
   "repository": "https://github.com/wtfsayo/agent-plugin-secret-guard",
@@ -54,6 +55,11 @@
       "install_dir": "~/.grok/hooks",
       "hook_file": "secret-guard.json",
       "tool_matchers": "Bash|run_terminal_command|Shell|Read|Write|Edit|MultiEdit"
+    },
+    "dev.omp": {
+      "hook_factory": "extensions/dev.omp/secret-guard.ts",
+      "install_dir": "~/.omp/agent/hooks",
+      "note": "install.sh omp copies the factory to hooks/pre/ and the python core to hooks/scripts/"
     }
   }
 }

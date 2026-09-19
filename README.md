@@ -4,7 +4,7 @@
 
 `secret-guard` is a **CLI-agent plugin**: it hooks into agent runtimes via their native extension surfaces (PreToolUse / PostToolUse / `hooks.json` / `settings.json` / `tool.execute.before`) and adds a single enforcement core — one Python hook + thin adapters per client.
 
-Works with **Factory Droid**, **Devin CLI**, **Claude Code**, **opencode**, **Grok CLI**, **Cursor**, and **Codex CLI**. One `secret_guard.py` core + thin adapters per client.
+Works with **Factory Droid**, **Devin CLI**, **Claude Code**, **opencode**, **Grok CLI**, **Cursor**, **Codex CLI**, and **omp** (oh-my-pi). One `secret_guard.py` core + thin adapters per client.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue)](scripts/secret_guard.py)
@@ -32,6 +32,7 @@ AI agents leak secrets all the time: `cat .env` to debug, `aws secretsmanager ge
 | **Grok CLI** | `~/.grok/hooks/secret-guard.json` | `Bash`/`run_terminal_command`/`Shell`/`Read`/`Write`/`Edit`/`MultiEdit` |
 | **Cursor** | `~/.cursor/hooks.json` via `cursor_adapter.py` | `preToolUse`, `postToolUse`, `beforeShellExecution`, `beforeReadFile`, `afterFileEdit`, `beforeMCPExecution`, `beforeTabFileRead` |
 | **Codex CLI** | `~/.codex/hooks.json` | `Bash`/`apply_patch`/`Edit`/`Write`/`MultiEdit`/`Read`/`mcp__*` |
+| **omp** (oh-my-pi) | `~/.omp/agent/hooks/pre/secret-guard.ts` factory → `tool_call`/`tool_result` | `bash`/`read`/`write`/`edit`/`ast_edit`/`memory_edit` + literal-secret scan on all tool args |
 | Other Agent Plugins clients | `skills/secret-guard/SKILL.md` | behavioral contract (no enforcement) |
 
 ## Install
@@ -47,6 +48,7 @@ cd agent-plugin-secret-guard
 ./install.sh grok       # → ~/.grok/hooks             (Grok CLI)
 ./install.sh cursor     # → ~/.cursor/hooks           (Cursor)
 ./install.sh codex      # → ~/.codex/hooks            (Codex CLI)
+./install.sh omp        # → ~/.omp/agent/hooks       (omp / oh-my-pi)
 ./install.sh /abs/path  # custom dir
 ```
 
