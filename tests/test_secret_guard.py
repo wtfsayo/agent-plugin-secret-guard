@@ -502,6 +502,15 @@ class ExecOpCaptureForms(unittest.TestCase):
         self.check('export T="$(op read "op://V/I/password")"; '
                    'python3 -c "import os;print(os.environ.get(\'T\'))"', "block")
 
+    def test_exported_capture_printenv(self):
+        self.check('export T="$(op read "op://V/I/password")"; printenv T', "block")
+
+    def test_exported_capture_env_dump(self):
+        self.check('export T="$(op read "op://V/I/password")"; env | sort', "block")
+
+    def test_inline_capture_env_prefix_runs_tool(self):
+        self.check('T="$(op read "op://V/I/password")" env FOO=1 tool', "allow")
+
     def test_export_capture(self):
         self.check('export T="$(op read "op://V/I/password")"; tool --pw "$T"',
                    "allow")

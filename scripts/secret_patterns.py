@@ -373,6 +373,12 @@ def _var_revealed(cmd, var):
         return True
     if re.search(r"\|\s*tee\b", cmd):
         return True
+    # Dumping the environment prints every exported capture.
+    if re.search(
+        r"\bprintenv\b|\b(?:env|set|(?:export|declare|typeset)\s+-p)\s*(?:$|[;|&\n>])",
+        cmd,
+    ):
+        return True
     # cat <<EOF heredoc bodies interpolate $VAR
     if re.search(r"\bcat\s*<<", cmd) and re.search(r"\$\{?" + v + r"\b", cmd):
         return True
