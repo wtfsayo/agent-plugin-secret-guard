@@ -14,6 +14,7 @@ HOOKS = os.path.dirname(os.path.abspath(__file__)) + "/../scripts"
 GUARD = os.path.join(HOOKS, "secret_guard.py")
 FETCH = os.path.join(HOOKS, "secret-fetch")
 RCAT = os.path.join(HOOKS, "redacted-cat")
+LOG = os.path.join(HOOKS, "secret_guard.log")
 
 # Synthetic placeholders, not real credentials.
 SK = "sk-" + "Ab3dEf9Gh8Jk2Mn4qRs6TuVwXy" + "Zz0123456789"   # 42 chars, lowercase digits tail
@@ -22,14 +23,26 @@ WHSEC = "whsec_" + "Zx9Qw8Er7Ty6Ui5O" * 2 + "As4Df6Gh"   # 46 chars
 PGURL = "postgres" + "://" + "u" + ":" + "p4ssw0rdXYZ123" + "@" + "host/db"
 
 
+def _log_size():
+    try:
+        return os.path.getsize(LOG)
+    except OSError:
+        return 0
+
+
 def run_guard(payload, env_off=False):
     env = dict(os.environ)
     if env_off:
         env["DEVIN_SECRET_GUARD"] = "off"
+    before = _log_size()
     r = subprocess.run(
         ["python3", GUARD], input=json.dumps(payload),
         capture_output=True, text=True, env=env,
     )
+    if _log_size() != before:
+        with open(LOG) as f:
+            f.seek(before)
+            raise AssertionError("guard crashed (fails open):\n" + f.read())
     return r
 
 
@@ -479,6 +492,20 @@ class ExecOpCaptureForms(unittest.TestCase):
         self.check("TOKEN=\"$(op read 'op://V/I/credential')\" wrangler deploy",
                    "allow")
 
+    def test_quoted_capture_as_echo_arg(self):
+        self.check('echo X="$(op read "op://V/I/password")"', "block")
+
+    def test_unquoted_capture_as_printf_arg(self):
+        self.check('printf "%s" X=$(op read "op://V/I/password")', "block")
+
+    def test_exported_capture_printed_by_child(self):
+        self.check('export T="$(op read "op://V/I/password")"; '
+                   'python3 -c "import os;print(os.environ.get(\'T\'))"', "block")
+
+    def test_export_capture(self):
+        self.check('export T="$(op read "op://V/I/password")"; tool --pw "$T"',
+                   "allow")
+
     def test_quoted_capture_echoed(self):
         self.check('PASS="$(op read "op://V/I/password")"; echo $PASS', "block")
 
@@ -488,6 +515,16 @@ class ExecOpCaptureForms(unittest.TestCase):
 
     def test_item_get_json_labels_raw(self):
         self.check('op item get I --format=json | jq -r ".fields[].label"', "allow")
+
+    def test_item_get_jq_filter_file(self):
+        self.check("op item get I --format json | jq -f '.fields[].label'", "block")
+
+    def test_item_get_jq_combined_file_flag(self):
+        self.check("op item get I --format json | jq -rf '.fields[].label'", "block")
+
+    def test_item_get_jq_shell_function(self):
+        self.check("jq() { cat; }; op item get I --format json | jq '.fields[].label'",
+                   "block")
 
     def test_item_get_json_values(self):
         self.check("op item get I --format json | jq '.fields[].value'", "block")
@@ -508,7 +545,10 @@ class InstallClaude(unittest.TestCase):
     def test_auto_merge_points_at_real_script(self):
         root = os.path.dirname(os.path.abspath(__file__)) + "/.."
         with tempfile.TemporaryDirectory() as home:
-            env = dict(os.environ, HOME=home)
+            env = {k: v for k, v in os.environ.items()
+                   if not k.endswith("_HOOKS_DIR")}
+            env.update(HOME=home,
+                       CLAUDE_HOOKS_DIR=os.path.join(home, ".claude", "hooks"))
             os.makedirs(os.path.join(home, ".claude"))
             r = subprocess.run(["bash", os.path.join(root, "install.sh"), "claude"],
                                input="y\n", capture_output=True, text=True, env=env)
@@ -519,6 +559,7 @@ class InstallClaude(unittest.TestCase):
                 cmd = hooks[ev][0]["hooks"][0]["command"]
                 script = cmd.split(" ", 1)[1]
                 self.assertTrue(os.path.isfile(script), f"{ev}: {cmd}")
+                self.assertTrue(script.startswith(home), script)
 
 
 if __name__ == "__main__":

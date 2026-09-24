@@ -330,12 +330,22 @@ LITERAL_REASON = (
 _SEG_SPLIT = re.compile(r";|&&|\|\||\n")
 # The optional quote admits VAR="$( … )", including the inline-prefix form
 # VAR="$( … )" cmd.
-_CAPTURE_RE = re.compile(r"([A-Za-z_]\w*)\s*=\s*\"?(?:\$\(|`)")
+_CAPTURE_RE = re.compile(r"([A-Za-z_]\w*)=\"?(?:\$\(|`)")
+# A capture only stays silent at a real assignment position: segment start,
+# after export/local/declare/readonly/typeset, or after earlier assignments.
+# `echo X="$(op read …)"` is an argument, and it prints the value.
+_ASSIGN_PREFIX_RE = re.compile(
+    r"\s*(?:(?:export|local|declare|readonly|typeset)(?:\s+-\w+)*\s+)?"
+    r"(?:[A-Za-z_]\w*=(?:\"[^\"]*\"|'[^']*'|[^\s\"'`$();|&]*)\s+)*"
+)
 
 
 def _captures(cmd):
     """Yield (varname, body_start, body_end) for VAR=$( … ) / VAR=` … `."""
     for m in _CAPTURE_RE.finditer(cmd):
+        prefix = _SEG_SPLIT.split(cmd[:m.start()])[-1]
+        if not _ASSIGN_PREFIX_RE.fullmatch(prefix):
+            continue
         var = m.group(1)
         if cmd[m.end() - 1] == "(":
             depth, i = 1, m.end()
@@ -425,7 +435,8 @@ def _aws_check(cmd):
 
 
 # `op item get … --format json | jq '<filter>'` prints only field metadata when
-# jq ends the segment and the filter is one of these exact label selectors.
+# jq ends the segment, the filter is one of these exact label selectors, and
+# only output-format flags are passed (-f would read the filter from a file).
 _JQ_LABEL_FILTERS = frozenset({
     ".fields[].label",
     ".fields[]|.label",
@@ -435,11 +446,15 @@ _JQ_LABEL_FILTERS = frozenset({
 })
 _OP_ITEM_JQ_RE = re.compile(
     r"\bop\s+item\s+get\b[^|]*--format(?:\s+|=)json\b[^|]*"
-    r"\|\s*jq\s+(?:-[a-zA-Z]+\s+)*(['\"])(?P<filter>[^'\"]*)\1\s*$"
+    r"\|\s*jq\s+(?:-[rcM]+\s+)*(['\"])(?P<filter>[^'\"]*)\1\s*$"
 )
+# A shell function or alias named jq would run instead of the real binary.
+_JQ_REDEFINED_RE = re.compile(r"\bjq\s*\(\s*\)|\bfunction\s+jq\b|\balias\s+jq\b")
 
 
-def _op_item_labels_only(seg):
+def _op_item_labels_only(seg, cmd):
+    if _JQ_REDEFINED_RE.search(cmd):
+        return False
     m = _OP_ITEM_JQ_RE.search(seg)
     return bool(m) and re.sub(r"\s+", "", m.group("filter")) in _JQ_LABEL_FILTERS
 
@@ -490,7 +505,7 @@ def _op_check(cmd):
                         continue
                 if _captured_ok(seg, r"op\s+item\s+get", cmd):
                     continue
-                if _op_item_labels_only(seg):
+                if _op_item_labels_only(seg, cmd):
                     continue
                 return OP_REASON
             continue
