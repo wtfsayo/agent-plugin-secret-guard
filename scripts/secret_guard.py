@@ -76,6 +76,7 @@ _SHELL_TOOLS = frozenset({
     "Execute", "write_to_process",
     "Shell", "run_terminal_command", "terminal", "exec",
     "shell", "bash", "sh",
+    "Bash",  # Claude Code
 })
 _FILE_READ_TOOLS = frozenset({
     "Read", "read_file",
@@ -83,6 +84,7 @@ _FILE_READ_TOOLS = frozenset({
 _FILE_WRITE_TOOLS = frozenset({
     "Create", "Write", "str_replace_editor", "fs_write", "write_file",
     "apply_patch", "Edit", "MultiEdit", "edit",
+    "NotebookEdit",  # Claude Code
 })
 
 
@@ -162,6 +164,10 @@ def pre_tool_use(data):
                     "new_content", "file_text", "patch", "new",
                 )
             )
+            # Claude Code MultiEdit nests its replacements in `edits`.
+            for edit in ti.get("edits") or []:
+                if isinstance(edit, dict):
+                    text += "\n" + str(edit.get("new_string") or "")
         hits = sp.find_secrets(text, include_medium=True)
         if hits:
             kind, val = hits[0]

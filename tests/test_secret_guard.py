@@ -437,5 +437,89 @@ class RedactedCat(unittest.TestCase):
         self.assertIn("<redacted:", r.stdout)
 
 
+class ClaudeCode(unittest.TestCase):
+    """Claude Code tool names and payload shapes."""
+
+    def test_bash_tool_guarded(self):
+        r = run_guard(pre("Bash", {"command": "cat .env"}))
+        self.assertEqual(decision(r), "block", r.stdout)
+
+    def test_bash_tool_plain(self):
+        r = run_guard(pre("Bash", {"command": "git status"}))
+        self.assertEqual(decision(r), "allow", r.stdout)
+
+    def test_notebook_edit_secret(self):
+        r = run_guard(pre("NotebookEdit", {"notebook_path": "/tmp/n.ipynb",
+                                           "new_source": f"key = '{SK}'"}))
+        self.assertEqual(decision(r), "block", r.stdout)
+
+    def test_multiedit_secret_in_edits(self):
+        r = run_guard(pre("MultiEdit", {"file_path": "/tmp/f", "edits": [
+            {"old_string": "a", "new_string": "b"},
+            {"old_string": "x", "new_string": f"tok={GHP}"},
+        ]}))
+        self.assertEqual(decision(r), "block", r.stdout)
+
+    def test_multiedit_plain(self):
+        r = run_guard(pre("MultiEdit", {"file_path": "/tmp/f", "edits": [
+            {"old_string": "a", "new_string": "b"}]}))
+        self.assertEqual(decision(r), "allow", r.stdout)
+
+
+class ExecOpCaptureForms(unittest.TestCase):
+    def check(self, cmd, expect):
+        r = run_guard(pre("Execute", {"command": cmd}))
+        self.assertEqual(decision(r), expect, f"{cmd!r}: {r.stdout}")
+
+    def test_quoted_capture(self):
+        self.check('PASS="$(op read "op://V/I/password")"; tool --pw "$PASS"',
+                   "allow")
+
+    def test_quoted_inline_prefix(self):
+        self.check("TOKEN=\"$(op read 'op://V/I/credential')\" wrangler deploy",
+                   "allow")
+
+    def test_quoted_capture_echoed(self):
+        self.check('PASS="$(op read "op://V/I/password")"; echo $PASS', "block")
+
+    def test_item_get_json_labels(self):
+        self.check("op item get I --vault V --format json | jq '.fields[].label'",
+                   "allow")
+
+    def test_item_get_json_labels_raw(self):
+        self.check('op item get I --format=json | jq -r ".fields[].label"', "allow")
+
+    def test_item_get_json_values(self):
+        self.check("op item get I --format json | jq '.fields[].value'", "block")
+
+    def test_item_get_json_whole(self):
+        self.check("op item get I --format json | jq '.'", "block")
+
+    def test_item_get_json_labels_then_pipe(self):
+        self.check("op item get I --format json | jq '.fields[].label' | tee x",
+                   "block")
+
+    def test_item_get_json_labels_extra_filter(self):
+        self.check("op item get I --format json | jq '.fields[].label, .fields[].value'",
+                   "block")
+
+
+class InstallClaude(unittest.TestCase):
+    def test_auto_merge_points_at_real_script(self):
+        root = os.path.dirname(os.path.abspath(__file__)) + "/.."
+        with tempfile.TemporaryDirectory() as home:
+            env = dict(os.environ, HOME=home)
+            os.makedirs(os.path.join(home, ".claude"))
+            r = subprocess.run(["bash", os.path.join(root, "install.sh"), "claude"],
+                               input="y\n", capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(os.path.join(home, ".claude", "settings.json")) as f:
+                hooks = json.load(f)["hooks"]
+            for ev in ("PreToolUse", "PostToolUse"):
+                cmd = hooks[ev][0]["hooks"][0]["command"]
+                script = cmd.split(" ", 1)[1]
+                self.assertTrue(os.path.isfile(script), f"{ev}: {cmd}")
+
+
 if __name__ == "__main__":
     unittest.main()

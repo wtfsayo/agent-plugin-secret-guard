@@ -328,7 +328,9 @@ LITERAL_REASON = (
 )
 
 _SEG_SPLIT = re.compile(r";|&&|\|\||\n")
-_CAPTURE_RE = re.compile(r"([A-Za-z_]\w*)\s*=\s*(?:\$\(|`)")
+# The optional quote admits VAR="$( … )", including the inline-prefix form
+# VAR="$( … )" cmd.
+_CAPTURE_RE = re.compile(r"([A-Za-z_]\w*)\s*=\s*\"?(?:\$\(|`)")
 
 
 def _captures(cmd):
@@ -422,6 +424,26 @@ def _aws_check(cmd):
     return None
 
 
+# `op item get … --format json | jq '<filter>'` prints only field metadata when
+# jq ends the segment and the filter is one of these exact label selectors.
+_JQ_LABEL_FILTERS = frozenset({
+    ".fields[].label",
+    ".fields[]|.label",
+    "[.fields[].label]",
+    ".fields[]|{label,type}",
+    ".fields[]|[.label,.type]",
+})
+_OP_ITEM_JQ_RE = re.compile(
+    r"\bop\s+item\s+get\b[^|]*--format(?:\s+|=)json\b[^|]*"
+    r"\|\s*jq\s+(?:-[a-zA-Z]+\s+)*(['\"])(?P<filter>[^'\"]*)\1\s*$"
+)
+
+
+def _op_item_labels_only(seg):
+    m = _OP_ITEM_JQ_RE.search(seg)
+    return bool(m) and re.sub(r"\s+", "", m.group("filter")) in _JQ_LABEL_FILTERS
+
+
 def _op_check(cmd):
     for seg in _SEG_SPLIT.split(cmd):
         m = re.search(r"\bop\s+([a-z]+)(?:\s+([a-z]+))?", seg)
@@ -467,6 +489,8 @@ def _op_check(cmd):
                     if fields and all(f in safe for f in fields):
                         continue
                 if _captured_ok(seg, r"op\s+item\s+get", cmd):
+                    continue
+                if _op_item_labels_only(seg):
                     continue
                 return OP_REASON
             continue
