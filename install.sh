@@ -60,7 +60,7 @@ if os.path.exists(path):
     try: data = json.load(open(path))
     except: data = {}
 data.setdefault("hooks", {})
-hook = {"type": "command", "command": f"python3 {dest}/secret_guard.py", "timeout": 10}
+hook = {"type": "command", "command": f"python3 {dest}/scripts/secret_guard.py", "timeout": 10}
 for ev in ("PreToolUse", "PostToolUse"):
     arr = data["hooks"].setdefault(ev, [])
     grp = next((g for g in arr if g.get("matcher") == "*"), None)
