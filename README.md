@@ -27,7 +27,7 @@ AI agents leak secrets all the time: `cat .env` to debug, `aws secretsmanager ge
 |---|---|---|
 | **Factory Droid** | `com.factory.droid` extension | full Pre + PostToolUse |
 | **Devin CLI** | `com.devin.hooks` extension | full Pre + PostToolUse (`exec`, `edit`) |
-| **Claude Code** | `com.anthropic.claude` settings.json merge | `Bash`/`Read`/`Write`/`Edit`/`MultiEdit`/`NotebookEdit` |
+| **Claude Code** | `.claude-plugin/plugin.json` plugin (hooks from `com.anthropic.claude`), or settings.json merge via `install.sh claude` | `Bash`/`Read`/`Write`/`Edit`/`MultiEdit`/`NotebookEdit` |
 | **opencode** / **opencode2** | `ai.opencode` TS plugin | `tool.execute.before` blocks; `tool.execute.after` logs |
 | **Grok CLI** | `~/.grok/hooks/secret-guard.json` | `Bash`/`run_terminal_command`/`Shell`/`Read`/`Write`/`Edit`/`MultiEdit` |
 | **Cursor** | `~/.cursor/hooks.json` via `cursor_adapter.py` | `preToolUse`, `postToolUse`, `beforeShellExecution`, `beforeReadFile`, `afterFileEdit`, `beforeMCPExecution`, `beforeTabFileRead` |
@@ -54,6 +54,16 @@ cd agent-plugin-secret-guard
 
 Each install copies `scripts/` + `tests/` into the target's hooks dir and writes the minimal config that client's loader expects — `hooks.json`, a settings.json merge, or a single-file hook manifest. End user approval is required before the agent's loader will run them on tools that support trust-review (Codex prompts once).
 
+### Claude Code plugin
+
+The repo is also a Claude Code plugin: `.claude-plugin/plugin.json` registers the PreToolUse + PostToolUse hooks from `extensions/com.anthropic.claude/hooks.settings.json`, which run `scripts/secret_guard.py` from the plugin directory. Use this instead of `./install.sh claude` (not both, or every tool call is checked twice):
+
+```bash
+claude --plugin-dir /path/to/agent-plugin-secret-guard   # load for one session
+# or, inside Claude Code, install from a marketplace that lists this repo:
+# /plugin install secret-guard@<marketplace>
+```
+
 ## What it catches
 
 | Source | Patterns |
@@ -78,6 +88,7 @@ Curated list covers ~70 vendor rules + 221 auto-synced gitleaks rules. Detect wh
 
 ```
 plugin.json
+├── .claude-plugin/plugin.json   (Claude Code plugin manifest)
 ├── extensions/
 │   ├── com.factory.droid/hooks.json
 │   ├── com.devin.hooks/hooks.json

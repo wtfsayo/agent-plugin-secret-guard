@@ -190,12 +190,19 @@ def pre_tool_use(data):
         )
 
 
-def post_tool_use(data):
-    resp = data.get("tool_response") or {}
+def _response_text(resp):
+    # Droid/Devin/omp send {"output", "error"}; Claude Code sends tool-specific
+    # shapes ({"stdout", "stderr"} for Bash, {"file": {"content"}} for Read,
+    # content-block lists for MCP), so scan every string leaf.
     if isinstance(resp, dict):
-        text = str(resp.get("output") or "") + "\n" + str(resp.get("error") or "")
-    else:
-        text = str(resp)
+        return "\n".join(_response_text(v) for v in resp.values())
+    if isinstance(resp, list):
+        return "\n".join(_response_text(v) for v in resp)
+    return resp if isinstance(resp, str) else ""
+
+
+def post_tool_use(data):
+    text = _response_text(data.get("tool_response"))
     hits = sp.find_secrets(text, include_medium=True) + sp.find_kv_secrets(text)
     if not hits:
         return
