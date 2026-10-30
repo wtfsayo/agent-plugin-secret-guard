@@ -3,9 +3,10 @@
 Stdlib only. Patterns ported from ~/.local/share/devin/secret-audit/scan.py.
 Never prints or returns full secret values to the user — use mask().
 """
+import bisect
 import os
 import re
-import warnings as _warnings
+import time
 
 # Optional: full Gitleaks rule catalog if the bundled module is present.
 # Sync it with `python3 scripts/sync_gitleaks.py`.
@@ -67,16 +68,18 @@ _GITLEAKS_QUARANTINE = frozenset({
     "nuget-config-password",
 })
 
-_GITLEAKS_COMPILED = []
-for _n, _p in _GITLEAKS:
-    if _n in _GITLEAKS_QUARANTINE:
-        continue
-    try:
-        with _warnings.catch_warnings():
-            _warnings.simplefilter("ignore", FutureWarning)
-            _GITLEAKS_COMPILED.append((_n, re.compile(_p)))
-    except re.error:
-        pass
+# (name, source, keywords). A rule is compiled the first time one of its
+# keywords shows up in scanned text, so a call that never needs it pays
+# nothing for it.
+_GITLEAKS_RULES = [(n, p, kws) for n, p, kws in _GITLEAKS if n not in _GITLEAKS_QUARANTINE]
+_GITLEAKS_CACHE = {}
+
+
+def _gitleaks_rx(name, pat):
+    rx = _GITLEAKS_CACHE.get(name)
+    if rx is None:
+        rx = _GITLEAKS_CACHE[name] = re.compile(pat)
+    return rx
 
 # Placeholder / example values to skip
 PLACEHOLDER = re.compile(r"(?i)(your[_-]?|example|placeholder|xxx+|redacted|<[^>]+>|\$\{|\.\.\.|changeme|dummy|test_?key|test[-_]?token|fake|sample|mock|lorem|deadbeef|sk-ant-api03-\.\.\.|0x0{20,}|0x1{20,}|abcdef0123|1234567890abcdef|0123456789abcdef)")
@@ -100,7 +103,8 @@ def sensitive_path_re():
     home = _home()
     return re.compile(
         r"(?:"
-        r"\.env(?:\.(?!example$|sample$|template$|test$)[^/]*)?$"
+        r"\.env(?!(?:\.[^/]*)?\.(?:example|sample|template|tsx?|jsx?|mjs|cjs|md|py)$)"
+        r"(?:\.(?!example$|sample$|template$|test$)[^/]*)?$"
         r"|" + re.escape(home) + r"/\.(?:zshrc|zshenv|zprofile|bashrc|bash_profile|profile)$"
         r"|" + re.escape(home) + r"/\.ssh/(?!config$|known_hosts)[^/]+$"
         r"|" + re.escape(home) + r"/\.aws/credentials$"
@@ -136,7 +140,7 @@ NAMES_ONLY_FILTER = re.compile(
 # with ~/.ssh/ excluding config/known_hosts and bare-env split out).
 LEAKY_CMD = re.compile(
     r"(?x)(?:^|[;&|]\s*|\bsudo\s+)\s*(?:"
-    r"(?:cat|bat|less|more|head|tail|tac|nl|strings|xxd|hexdump)\s+(?!>{1,2}\s)[^;|&\n]*(?:\.env(?!\.example|\.sample|\.template)|\bcredentials(?:\.json|\.ya?ml|/|\s|$)|secrets?\.(?:json|ya?ml|toml|env|txt|properties|ini)\b|[._]secrets?\.|auth\.json|\.netrc|\.npmrc|\.pypirc|id_rsa|id_ed25519|\.pem\b|\.key\b|keypair|wallet|\.aws/|\.ssh/(?!config\b|known_hosts)|\.docker/config|\.git-credentials|\.zshrc|\.bashrc|\.zshenv|\.profile|\.hermes/|\.config/gh/hosts\.yml|\.zsh_history|\.bash_history|\.python_history)"
+    r"(?:cat|bat|less|more|head|tail|tac|nl|strings|xxd|hexdump)\s+(?!>{1,2}\s)[^;|&\n]*(?:\.env(?!(?:\.[\w-]+)*\.(?:example|sample|template|tsx?|jsx?|mjs|cjs|md|py)\b)(?!\.example|\.sample|\.template)|\bcredentials(?:\.json|\.ya?ml|/|\s|$)|secrets?\.(?:json|ya?ml|toml|env|txt|properties|ini)\b|[._]secrets?\.|auth\.json|\.netrc|\.npmrc|\.pypirc|id_rsa|id_ed25519|\.pem\b|\.key\b|keypair|wallet|\.aws/|\.ssh/(?!config\b|known_hosts)|\.docker/config|\.git-credentials|\.zshrc|\.bashrc|\.zshenv|\.profile|\.hermes/|\.config/gh/hosts\.yml|\.zsh_history|\.bash_history|\.python_history)"
     r"|printenv\s+\S*(?:KEY|SECRET|TOKEN|PASS)"
     r"|echo\s+[\"']?\$\{?[A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASS|PRIVATE|CREDENTIAL)[A-Z0-9_]*"
     r"|gh\s+auth\s+token|gh\s+auth\s+status\s+.*--show-token"
@@ -163,13 +167,28 @@ BARE_ENV_CMD = re.compile(r"(?:^|[;&|]\s*|\bsudo\s+)\s*(?:printenv|env|export\s+
 # touching a sensitive path's metadata is fine, reading it is not).
 _CONTENT_VERB = re.compile(
     r"\b(?:cat|bat|less|more|head|tail|tac|nl|strings|xxd|hexdump|grep|rg|ag|"
-    r"awk|sed|cut|jq|yq|python3?|node|ruby|perl|diff|cmp|base64)\b|open\("
+    r"awk|sed|cut|jq|yq|python3?|node|ruby|perl|diff|cmp|base64|"
+    r"sort|uniq|od|paste|fold|rev|column|dd|tr|git\s+(?:show|cat-file))\b|open\("
 )
 # Path-like tokens: ~/…, $HOME/…, /abs/…, ./…/.hidden, or relative a/b.
+# Glob characters are kept so `cat .e*` yields the token `.e*`.
 _PATH_TOKEN = re.compile(
-    r"~/[^\s'\"`$;|&()>]+|\$HOME[^\s'\"`$;|&()>]*|/[A-Za-z0-9_.\-/]+|"
-    r"(?<![\w/])\.[A-Za-z0-9_.\-/]+|(?<![\w/.-])[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-/]+"
+    r"~/[^\s'\"`$;|&()>]+|\$HOME[^\s'\"`$;|&()>]*|/[A-Za-z0-9_.\-/*?\[\]]+|"
+    r"(?<![\w/])\.[A-Za-z0-9_.\-/*?\[\]]+|(?<![\w/.-])[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-/*?\[\]]+"
 )
+# A glob whose literal prefix is `.`, `.e`, `.en` or `.env…` can expand to .env.
+_ENV_GLOB_PREFIX = re.compile(r"\.(?:e(?:n(?:v.*)?)?)?")
+# grep that prints only counts, file names, or an exit status.
+_GREP_NO_CONTENT = re.compile(
+    r"\s-[A-Za-z]*[clLq][A-Za-z]*\b|\s--(?:count|files-with(?:out)?-matches|quiet|silent)\b"
+)
+
+
+def _is_env_glob(tok):
+    base = tok.rstrip("/").rsplit("/", 1)[-1]
+    if not re.search(r"[*?\[]", base):
+        return False
+    return bool(_ENV_GLOB_PREFIX.fullmatch(re.split(r"[*?\[]", base, maxsplit=1)[0]))
 
 
 def references_sensitive_path(cmd):
@@ -177,21 +196,33 @@ def references_sensitive_path(cmd):
     sen = sensitive_path_re()
     home = _home()
     for seg in _SEG_SPLIT.split(cmd):
-        if not _CONTENT_VERB.search(seg):
+        verbs = {v.split()[0] for v in _CONTENT_VERB.findall(seg)}
+        if not verbs:
+            continue
+        if verbs == {"grep"} and _GREP_NO_CONTENT.search(seg):
             continue
         for m in _PATH_TOKEN.finditer(seg):
             if sen.search(_norm_path(m.group(0), home)):
                 return True
+        # The shell only expands unquoted globs; quoted `.*` is a regex.
+        unquoted = re.sub(r"'[^']*'|\"[^\"]*\"", " ", seg)
+        if any(_is_env_glob(m.group(0)) for m in _PATH_TOKEN.finditer(unquoted)):
+            return True
     return False
+
+
+def _dumps_env(seg):
+    """True when seg runs a bare env dump without a names-only filter."""
+    # Quote-stripped so `|env|` inside a quoted grep pattern doesn't trip it.
+    unquoted = re.sub(r"'[^']*'|\"[^\"]*\"", "", seg)
+    return bool(BARE_ENV_CMD.search(unquoted)) and not NAMES_ONLY_FILTER.search(seg)
 
 
 def is_leaky_cmd(cmd):
     if LEAKY_CMD.search(cmd):
         return True
-    # Bare-env test runs on quote-stripped text so `|env|` inside a quoted
-    # grep pattern doesn't trip it (ssh remotes are re-checked below anyway).
-    unquoted = re.sub(r"'[^']*'|\"[^\"]*\"", "", cmd)
-    if BARE_ENV_CMD.search(unquoted) and not NAMES_ONLY_FILTER.search(cmd):
+    # Judged per segment so `env | cut -d= -f1; env` can't borrow the filter.
+    if any(_dumps_env(seg) for seg in _SEG_SPLIT.split(cmd)):
         return True
     if references_sensitive_path(cmd):
         return True
@@ -224,27 +255,84 @@ def _accept(name, val):
     return True
 
 
-def find_secrets(text, include_medium=False):
-    """Return [(kind, value), ...] for secret-like values in text."""
+# Scans run over overlapping windows so a single call never hands the regex
+# engine an unbounded run. Every offset has at least OVERLAP chars of context
+# after it in some window, so tokens up to that length are seen whole.
+WINDOW = 4096
+OVERLAP = 512
+
+
+class ScanBudgetExceeded(Exception):
+    """Raised when a scan passes its deadline before finishing."""
+
+
+def _windows(text):
+    if len(text) <= WINDOW:
+        yield 0, text
+        return
+    step = WINDOW - OVERLAP
+    for start in range(0, len(text), step):
+        yield start, text[start:start + WINDOW]
+        if start + WINDOW >= len(text):
+            return
+
+
+def _scan_one(text, pats, deadline, out, seen, gitleaks_hit):
+    low = text.lower()
+    rules = [r for r in _GITLEAKS_RULES if any(k in low for k in r[2])]
+    newlines = None
+
+    def line_of(pos):
+        nonlocal newlines
+        if newlines is None:
+            newlines = [m.start() for m in re.finditer("\n", text)]
+        return bisect.bisect_right(newlines, pos - 1) + 1
+
+    for start, win in _windows(text):
+        if deadline is not None and time.monotonic() > deadline:
+            raise ScanBudgetExceeded()
+        for name, rx in pats:
+            for m in rx.finditer(win):
+                val = m.group(1) if m.lastindex else m.group(0)
+                if not _accept(name, val):
+                    continue
+                hit = (name, val, line_of(start + m.start()))
+                if hit not in seen:
+                    seen.add(hit)
+                    out.append(hit)
+        wlow = win.lower() if len(text) > WINDOW else low
+        for name, pat, kws in rules:
+            if name in gitleaks_hit or not any(k in wlow for k in kws):
+                continue
+            for m in _gitleaks_rx(name, pat).finditer(win):
+                val = m.group(1) if m.lastindex else m.group(0)
+                if val and _accept_gitleaks(val):
+                    gitleaks_hit.add(name)  # one hit per rule is enough signal
+                    out.append((name, val, line_of(start + m.start())))
+                    break
+
+
+def scan(text, include_medium=False, deadline=None):
+    """Return [(kind, value, line), ...] for secret-like values in text.
+
+    `deadline` is a time.monotonic() value; past it, ScanBudgetExceeded is
+    raised so callers can fail closed instead of hitting the hook timeout.
+    """
     pats = _HIGH + (_MED if include_medium else [])
-    out = []
-    # Secrets nested in JSON-in-JSON arrive as \"password\":\"…\"; unescape so
-    # the quote-sensitive patterns can see them.
+    out, seen, gitleaks_hit = [], set(), set()
+    _scan_one(text, pats, deadline, out, seen, gitleaks_hit)
+    # Secrets nested in JSON-in-JSON arrive as \"password\":\"…\"; scan an
+    # unescaped copy too so the quote-sensitive patterns can see them. The
+    # replacement keeps newlines, so its line numbers match the original.
     if '\\"' in text:
-        text = text + "\n" + text.replace('\\"', '"').replace("\\/", "/")
-    for name, rx in pats:
-        for m in rx.finditer(text):
-            val = m.group(1) if m.lastindex else m.group(0)
-            if _accept(name, val):
-                out.append((name, val))
-    # Gitleaks catalog coverage (broader than curated list, rules use (?i) prefix).
-    for name, rx in _GITLEAKS_COMPILED:
-        for m in rx.finditer(text):
-            val = m.group(1) if m.lastindex else m.group(0)
-            if val and _accept_gitleaks(val):
-                out.append((name, val))
-                break  # one hit per rule is enough signal
+        _scan_one(text.replace('\\"', '"').replace("\\/", "/"),
+                  pats, deadline, out, seen, gitleaks_hit)
     return out
+
+
+def find_secrets(text, include_medium=False, deadline=None):
+    """Return [(kind, value), ...] for secret-like values in text."""
+    return [(k, v) for k, v, _ in scan(text, include_medium, deadline)]
 
 
 def _accept_gitleaks(val):
@@ -299,16 +387,18 @@ _AWS_ALLOW = {
 _AWS_GET = {"get-secret-value", "batch-get-secret-value"}
 _AWS_PUT = {"put-secret-value", "update-secret", "create-secret"}
 
+# `{fetch}` is replaced with the secret-fetch invocation for this install
+# (see check_secret_cli).
 AWS_GET_REASON = (
     "Blocked: `aws secretsmanager get-secret-value` would print secret values "
-    "into the session. Use `~/.config/droid/hooks/secret-fetch aws <secret-id> "
+    "into the session. Use `{fetch} aws <secret-id> "
     "[--version-id V] [--profile P] [--region R]` with `--keys` (key names), "
     "`--len`, `--hash` (sha256 prefix per key, for comparing versions), "
     "`--shape KEY` (value with the secret parts masked, e.g. "
     "postgres://user:<redacted>@host/db), `--masked-json`, or `--env-exec -- "
     "<cmd>` to run a command with the keys exported as env vars without "
     "revealing them. Or capture silently: `VAR=$(aws … --query SecretString "
-    "--output text)` and never echo it. Inside Python use `secret-fetch aws "
+    "--output text)` and never echo it. Inside Python use `{fetch} aws "
     "<id> --env-exec -- python3 script.py` and read os.environ."
 )
 
@@ -316,14 +406,14 @@ OP_REASON = (
     "Blocked: `op` would print secret values into the session. Capture "
     "silently: `PASS=$(op read \"op://Vault/Item/password\")` then pass "
     "`\"$PASS\"` to the program (echo only `${#PASS}`); inspect an item's "
-    "structure with `~/.config/droid/hooks/secret-fetch op <item> [--vault V]` "
+    "structure with `{fetch} op <item> [--vault V]` "
     "(labels, types, masked values); or use `op run --env-file .env.tpl -- "
     "<cmd>` / `op inject -i tpl -o file`."
 )
 
 LITERAL_REASON = (
     "Blocked: secret literal in command. Pass `--secret-string file://path` "
-    "or `\"$VAR\"`; build the new JSON with `secret-fetch aws <id> --env-exec "
+    "or `\"$VAR\"`; build the new JSON with `{fetch} aws <id> --env-exec "
     "-- python3 rotate.py` reading os.environ."
 )
 
@@ -522,7 +612,8 @@ def _op_check(cmd):
     return None
 
 
-def check_secret_cli(cmd):
+def check_secret_cli(cmd, fetch="secret-fetch"):
     """Dedicated AWS Secrets Manager / 1Password op checker.
-    Returns a block reason string, or None."""
-    return _aws_check(cmd) or _op_check(cmd)
+    Returns a block reason string naming `fetch` as the helper, or None."""
+    reason = _aws_check(cmd) or _op_check(cmd)
+    return reason.replace("{fetch}", fetch) if reason else None

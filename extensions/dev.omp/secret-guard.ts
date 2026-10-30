@@ -13,8 +13,9 @@
  *   ~/.omp/agent/hooks/scripts/secret_guard.py + secret_patterns.py + helpers
  *
  * Escape hatch: OMP_SECRET_GUARD=off (also honors the core's
- * DROID_SECRET_GUARD/DEVIN_SECRET_GUARD=off). Fail-open like the core:
- * spawn errors, timeouts, and unparseable output never block a tool.
+ * SECRET_GUARD/DROID_SECRET_GUARD/DEVIN_SECRET_GUARD=off). The core denies
+ * on its own internal errors; spawn errors, timeouts, and unparseable output
+ * in this adapter never block a tool.
  */
 import type { HookAPI, ToolCallEvent, ToolResultEvent } from "@oh-my-pi/pi-coding-agent";
 import * as path from "node:path";
