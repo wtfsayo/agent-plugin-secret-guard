@@ -1,98 +1,97 @@
 #!/usr/bin/env python3
 """Translate Cursor's hook event shape → Droid shape so secret_guard.py
-doesn't need to know anything about Cursor.
+doesn't need to know anything about Cursor (https://cursor.com/docs/hooks).
 
 Cursor sends on stdin:
   { conversation_id, hook_event_name: 'preToolUse', tool_name, tool_input,
     cursor_version, workspace_roots, ... }
+  plus per-event fields: beforeShellExecution {command}, beforeReadFile
+  {file_path}, postToolUse {tool_output}, afterShellExecution {output},
+  afterMCPExecution {result_json}.
 Cursor expects on stdout:
-  { permission: 'allow' | 'deny' }   (beforeShellExecution, beforeReadFile, etc.)
-  { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny' } }
+  pre events:  { permission: 'deny', user_message, agent_message }
+  post events: { additional_context }
 """
-import os, sys, json, subprocess
+import json
+import os
+import subprocess
+import sys
 
 SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "secret_guard.py")
 
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-
-ev_raw = (data.get("hook_event_name") or "").lower()
-
-# Map cursor lowerCamel event → canonical event name.
+# Cursor lowerCamel event → canonical event name.
 EV = {
     "pretooluse": "PreToolUse",
     "posttooluse": "PostToolUse",
-    "beforeshellexecution": "PreToolUse",   # treat shell pre-hooks as PreToolUse
+    "beforeshellexecution": "PreToolUse",
     "aftershellexecution": "PostToolUse",
     "beforereadfile": "PreToolUse",
-    "afterfileedit": "PostToolUse",
     "beforemcpexecution": "PreToolUse",
     "aftermcpexecution": "PostToolUse",
     "beforetabfileread": "PreToolUse",
-    "aftertabfiledit": "PostToolUse",
-}.get(ev_raw, None)
-if not EV:
-    sys.exit(0)
-
-# Build a tool-shaped payload. Cursor's beforeShellExecution uses
-# { command } and beforeReadFile uses { file_path } + { content }.
-tool_name = data.get("tool_name") or ""
-tool_input = data.get("tool_input") or {}
-
-# Cursor's hook-specific fields live at top level, not under tool_input:
-#   beforeShellExecution  → { command: str, ... }
-#   beforeReadFile        → { file_path, content }
-#   afterFileEdit         → { file_path, edits: [{new_string, ...}] }
-if ev_raw == "beforeshellexecution":
-    tool_name = tool_name or "Shell"
-    cmd = tool_input.get("command") if isinstance(tool_input, dict) else None
-    if not cmd:
-        cmd = data.get("command") or data.get("input") or ""
-    if isinstance(cmd, str):
-        tool_input = {"command": cmd}
-elif ev_raw == "beforereadfile":
-    tool_name = tool_name or "Read"
-    fp = (tool_input.get("file_path") if isinstance(tool_input, dict) else None) or data.get("file_path")
-    if fp:
-        tool_input = {"file_path": fp}
-elif ev_raw == "afterfileedit":
-    tool_name = tool_name or "Write"
-    fp = (tool_input.get("file_path") if isinstance(tool_input, dict) else None) or data.get("file_path")
-    edits = data.get("edits") or []
-    content = "\n".join(e.get("new_string") or "" for e in edits if isinstance(e, dict))
-    tool_input = {"file_path": fp or "", "content": content}
-elif ev_raw in ("beforemcpexecution", "aftermcpexecution"):
-    tool_name = tool_name or "MCP:unknown"
-
-payload = {
-    "hook_event_name": EV,
-    "tool_name": tool_name,
-    "tool_input": tool_input,
+}
+# Where each post event carries the output the model will see.
+OUTPUT_FIELD = {
+    "posttooluse": "tool_output",
+    "aftershellexecution": "output",
+    "aftermcpexecution": "result_json",
 }
 
-try:
-    r = subprocess.run(
-        ["python3", SCRIPT],
-        input=json.dumps(payload), capture_output=True, text=True, timeout=10,
-    )
-except Exception:
-    sys.exit(0)
 
-if r.returncode == 2 or "permissionDecision" in r.stdout:
-    # Translate guard's hookSpecificOutput back to Cursor's { permission:"deny" }.
+def build_payload(data):
+    ev_raw = (data.get("hook_event_name") or "").lower()
+    event = EV.get(ev_raw)
+    if not event:
+        return None
+    tool_name = data.get("tool_name") or ""
+    tool_input = data.get("tool_input") or {}
+    # Cursor's hook-specific fields live at top level, not under tool_input.
+    if ev_raw in ("beforeshellexecution", "aftershellexecution"):
+        tool_name = tool_name or "Shell"
+        cmd = tool_input.get("command") if isinstance(tool_input, dict) else None
+        tool_input = {"command": cmd or data.get("command") or data.get("input") or ""}
+    elif ev_raw in ("beforereadfile", "beforetabfileread"):
+        tool_name = "Read"
+        fp = (tool_input.get("file_path") if isinstance(tool_input, dict) else None) or data.get("file_path")
+        tool_input = {"file_path": fp or ""}
+    elif ev_raw in ("beforemcpexecution", "aftermcpexecution"):
+        tool_name = f"MCP:{tool_name or 'unknown'}"
+    payload = {"hook_event_name": event, "tool_name": tool_name, "tool_input": tool_input}
+    if event == "PostToolUse":
+        payload["tool_response"] = {"output": data.get(OUTPUT_FIELD.get(ev_raw, ""), "")}
+    return payload
+
+
+def main():
     try:
-        out = json.loads(r.stdout.strip().splitlines()[-1])
-        inner = out.get("hookSpecificOutput") or {}
-        if inner.get("permissionDecision") == "deny":
-            # Cursor uses `"permission"` at top level for before*shell/read events.
-            print(json.dumps({"permission": "deny"}))
-            sys.exit(2)
+        data = json.load(sys.stdin)
     except Exception:
-        pass
-    # Fallback: deny-by-exit-2.
-    sys.exit(2)
+        return 0
+    payload = build_payload(data)
+    if payload is None:
+        return 0
+    pre = payload["hook_event_name"] == "PreToolUse"
+    try:
+        r = subprocess.run(
+            [sys.executable, SCRIPT],
+            input=json.dumps(payload), capture_output=True, text=True, timeout=9,
+        )
+        out = json.loads(r.stdout.strip().splitlines()[-1]) if r.stdout.strip() else {}
+    except Exception:
+        if pre:  # fail closed, like the core
+            msg = "Blocked: secret-guard could not run; retry or check the hook install."
+            print(json.dumps({"permission": "deny", "user_message": msg, "agent_message": msg}))
+            return 2
+        return 0
+    inner = out.get("hookSpecificOutput") or {}
+    if inner.get("permissionDecision") == "deny":
+        msg = inner.get("permissionDecisionReason") or "Blocked by secret-guard"
+        print(json.dumps({"permission": "deny", "user_message": msg, "agent_message": msg}))
+        return 2
+    if inner.get("additionalContext"):
+        print(json.dumps({"additional_context": inner["additionalContext"]}))
+    return 0
 
-# Empty stdout => allow.
-sys.exit(0)
+
+if __name__ == "__main__":
+    sys.exit(main())

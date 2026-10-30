@@ -16,7 +16,7 @@ Secrets may be *retrieved*, *used*, and *stored* — but never *printed*. Always
 - `cat`, `head`, `tail`, `jq`, `python3 -c`, `node -e`, `grep`, `awk` output that contains a secret value
 - `op item get … --reveal`, `op item get … --fields password`, `aws secretsmanager get-secret-value`, `gh auth token`, `security find-generic-password`, `vault read`, `doppler secrets`, `kubectl get secret -o yaml`, `vercel env pull`, `railway variables`, `fly secrets list`, `heroku config`
 - `echo "$PASS"`, `printenv $KEY`, `env` with no `cut -d= -f1`
-- `Read`/`Edit`/`Create` of files known to contain secrets, or `Edit` `new_str` carrying a literal secret
+- Reading, content-grepping, or editing files known to contain secrets, or writing a literal secret into a file
 - Browser automation that evaluates or screenshot-reveals a password/secret
 - Connection strings that embed a password between the `://` and `@` delimiters — database URIs, AMQP/Redis URLs, proxies — count the whole embedded credential
 
@@ -25,10 +25,12 @@ Secrets may be *retrieved*, *used*, and *stored* — but never *printed*. Always
 ### Inspect a credential store without leaking
 
 ```bash
-~/.config/{droid,devin}/hooks/secret-fetch op   <item_id> [--vault V]   # labels, types, masked values
-~/.config/{droid,devin}/hooks/secret-fetch aws  <secret-id> [--keys|--len|--hash|--masked-json|--shape KEY|--env-exec -- CMD]
-~/.config/{droid,devin}/hooks/redacted-cat     <file> [-n START,END]     # file content with secrets masked
+secret-fetch op   <item_id> [--vault V]   # labels, types, masked values
+secret-fetch aws  <secret-id> [--keys|--len|--hash|--masked-json|--shape KEY|--env-exec -- CMD]
+redacted-cat     <file> [-n START,END]     # file content with secrets masked
 ```
+
+In Claude Code the plugin puts both helpers on PATH. Other installs keep them in `<hooks dir>/scripts/` (for example `~/.config/droid/hooks/scripts/secret-fetch`); the guard's block messages name the right path.
 
 ### Pull a value without printing it
 
@@ -46,15 +48,17 @@ For 1Password specifically, `op item get --fields username` and `op item list` (
 ```bash
 # Don't: cat .env / Read backend/.env / grep KEY .env / jq . .mcp.json
 # Do:
-~/.config/droid/hooks/redacted-cat .env
-~/.config/droid/hooks/redacted-cat ~/.zshrc | grep -i openai
+redacted-cat .env
+redacted-cat ~/.zshrc | grep -i openai
 env | cut -d= -f1 | grep -i key                      # names only
 ```
+
+When a Read is blocked because the file holds secret-like values, the message lists their line numbers: read a range that excludes them, or view that range with `redacted-cat <file> -n START,END`.
 
 ### Get a secret into a script
 
 ```bash
-~/.config/droid/hooks/secret-fetch aws my/secret --env-exec -- python3 script.py
+secret-fetch aws my/secret --env-exec -- python3 script.py
 op run --env-file ./env.tpl -- ./script              # injects op://refs as env vars
 ```
 
@@ -77,4 +81,4 @@ Before any final answer that reports on values retrieved earlier:
 
 ## Escape hatches
 
-`DROID_SECRET_GUARD=off` or `DEVIN_SECRET_GUARD=off` in the environment disables the pre/post-use guards without changing this skill's instructions. Do not set this quietly; if you need an unredacted read, surface the reason to the user first.
+`SECRET_GUARD=off` in the environment disables the pre/post-use guards in every client (the older `DROID_SECRET_GUARD=off` and `DEVIN_SECRET_GUARD=off` still work) without changing this skill's instructions. Set it only after telling the user why you need an unredacted read.

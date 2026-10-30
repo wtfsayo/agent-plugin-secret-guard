@@ -5,35 +5,45 @@
  * Install: add to ~/.config/opencode/opencode.json
  *   "plugin": ["/path/to/agent-plugin-secret-guard/extensions/ai.opencode/plugin/secret-guard.ts"]
  *
- * Or run `install.sh opencode` which symlinks this into
- * ~/.config/opencode/plugin/secret-guard.ts and adds it to opencode.json.
+ * Or run `install.sh opencode`, which copies this file to
+ * ~/.config/opencode/plugin/secret-guard.ts (core in plugin/scripts/) and
+ * adds it to opencode.json.
+ *
+ * before: a deny throws, which blocks the tool. If the core cannot run at
+ * all, the call is blocked too (fail closed, like the core's PreToolUse).
+ * after: a leak warning is appended to the tool output the model sees.
  */
 
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const GUARD = join(HERE, "..", "..", "..", "scripts", "secret_guard.py");
+// Installed copy: plugin/scripts/; repo checkout: <repo>/scripts/.
+const GUARD = [join(HERE, "scripts", "secret_guard.py"), join(HERE, "..", "..", "..", "scripts", "secret_guard.py")]
+  .find((p) => existsSync(p)) ?? join(HERE, "scripts", "secret_guard.py");
 
-function call_guard(event: "PreToolUse" | "PostToolUse", tool: string, input: unknown) {
-  const payload = JSON.stringify({
-    hook_event_name: event,
-    tool_name: tool,
-    tool_input: input,
-  });
-  const r = spawnSync("python3", [GUARD], {
-    input: payload,
-    encoding: "utf8",
-    timeout: 10_000,
-  });
-  if (r.error || r.status === null) return null;
-  const stdout = (r.stdout ?? "") + (r.stderr ?? "");
-  // Guard emits {"hookSpecificOutput":{...}} for allow/deny/context.
-  const m = stdout.match(/\{[\s\S]*"hookSpecificOutput"[\s\S]*\}/);
-  if (!m) return null;
+/** opencode tool name → name the core's tool families recognize. */
+const TOOL_MAP: Record<string, string> = { read: "Read", write: "Write", edit: "Edit" };
+
+/** opencode args are camelCase; the core reads snake_case keys. */
+function toToolInput(args: Record<string, unknown> = {}): Record<string, unknown> {
+  const ti: Record<string, unknown> = { ...args };
+  if (typeof ti.filePath === "string" && ti.file_path === undefined) ti.file_path = ti.filePath;
+  if (typeof ti.newString === "string" && ti.new_string === undefined) ti.new_string = ti.newString;
+  return ti;
+}
+
+type Verdict = { permissionDecision?: string; permissionDecisionReason?: string; additionalContext?: string };
+
+function callGuard(payload: Record<string, unknown>): Verdict | null | undefined {
+  const r = spawnSync("python3", [GUARD], { input: JSON.stringify(payload), encoding: "utf8", timeout: 10_000 });
+  if (r.error || r.status === null) return undefined; // core did not run
+  const line = (r.stdout ?? "").trim().split("\n").pop() ?? "";
+  if (!line) return null;
   try {
-    return JSON.parse(m[0]).hookSpecificOutput ?? null;
+    return JSON.parse(line).hookSpecificOutput ?? null;
   } catch {
     return null;
   }
@@ -42,25 +52,29 @@ function call_guard(event: "PreToolUse" | "PostToolUse", tool: string, input: un
 const SecretGuard = async () => ({
   "tool.execute.before": async (
     input: { tool: string; sessionID: string; callID: string },
-    output: { args: any }
+    output: { args: Record<string, unknown> }
   ) => {
-    const decision = call_guard("PreToolUse", input.tool, output.args);
-    if (decision?.permissionDecision === "deny") {
-      throw new Error(decision.permissionDecisionReason ?? "blocked by secret-guard");
+    const v = callGuard({
+      hook_event_name: "PreToolUse",
+      tool_name: TOOL_MAP[input.tool] ?? input.tool,
+      tool_input: toToolInput(output.args),
+    });
+    if (v === undefined) throw new Error("secret-guard could not run python3 " + GUARD);
+    if (v?.permissionDecision === "deny") {
+      throw new Error(v.permissionDecisionReason ?? "blocked by secret-guard");
     }
   },
   "tool.execute.after": async (
-    input: { tool: string; sessionID: string; callID: string; args: any },
-    output: { title: string; output: string; metadata: any }
+    input: { tool: string; sessionID: string; callID: string; args?: Record<string, unknown> },
+    output: { title: string; output: string; metadata: unknown }
   ) => {
-    const ctx = call_guard("PostToolUse", input.tool, {
-      ...input.args,
-      __output: output.output,
+    const v = callGuard({
+      hook_event_name: "PostToolUse",
+      tool_name: TOOL_MAP[input.tool] ?? input.tool,
+      tool_input: toToolInput(input.args),
+      tool_response: { output: output.output },
     });
-    if (ctx?.additionalContext) {
-      // No supported output channel for PostToolUse context in this hook spec;
-      // rely on the guard's stderr/log for visibility.
-    }
+    if (v?.additionalContext) output.output = `${output.output ?? ""}\n\n${v.additionalContext}`;
   },
 });
 

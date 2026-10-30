@@ -3,34 +3,38 @@
   "hooks": {
     "preToolUse": [
       {
-        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/secret_guard.py",
+        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/cursor_adapter.py",
         "matcher": ".*",
-        "timeout": 10
+        "timeout": 10,
+        "failClosed": true
       }
     ],
     "postToolUse": [
       {
-        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/secret_guard.py",
+        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/cursor_adapter.py",
         "matcher": ".*",
         "timeout": 10
       }
     ],
     "beforeShellExecution": [
       {
-        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/secret_guard.py",
-        "timeout": 10
+        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/cursor_adapter.py",
+        "timeout": 10,
+        "failClosed": true
       }
     ],
     "beforeReadFile": [
       {
-        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/secret_guard.py",
-        "timeout": 10
+        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/cursor_adapter.py",
+        "timeout": 10,
+        "failClosed": true
       }
     ],
     "beforeMCPExecution": [
       {
-        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/secret_guard.py",
-        "timeout": 10
+        "command": "python3 ${CURSOR_HOOKS_DIR:-~/.cursor/hooks}/scripts/cursor_adapter.py",
+        "timeout": 10,
+        "failClosed": true
       }
     ]
   }

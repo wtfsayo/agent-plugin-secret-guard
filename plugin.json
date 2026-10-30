@@ -42,9 +42,9 @@
       "install_dir": "~/.config/droid/hooks"
     },
     "com.anthropic.claude": {
-      "settings_snippet": "extensions/com.anthropic.claude/hooks.settings.json",
+      "plugin_manifest": ".claude-plugin/plugin.json",
       "install_dir": "~/.claude/hooks",
-      "merge_into": "~/.claude/settings.json"
+      "note": "load as a plugin (hooks use ${CLAUDE_PLUGIN_ROOT}), or run install.sh claude, which merges hooks with absolute paths into ~/.claude/settings.json"
     },
     "ai.opencode": {
       "plugin_module": "extensions/ai.opencode/plugin/secret-guard.ts",
@@ -55,6 +55,16 @@
       "install_dir": "~/.grok/hooks",
       "hook_file": "secret-guard.json",
       "tool_matchers": "Bash|run_terminal_command|Shell|Read|Write|Edit|MultiEdit"
+    },
+    "io.cursor": {
+      "hooks_config": "extensions/io.cursor/hooks.json",
+      "install_dir": "~/.cursor/hooks",
+      "merge_into": "~/.cursor/hooks.json"
+    },
+    "ai.openai.codex": {
+      "hooks_config": "extensions/ai.openai.codex/hooks.json",
+      "install_dir": "~/.codex/hooks",
+      "merge_into": "~/.codex/hooks.json"
     },
     "dev.omp": {
       "hook_factory": "extensions/dev.omp/secret-guard.ts",

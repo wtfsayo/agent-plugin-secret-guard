@@ -31,6 +31,33 @@ cp -p "$PLUGIN_DIR"/tests/test_secret_guard.py "$DEST"/tests/
 chmod +x "$DEST"/scripts/secret_guard.py "$DEST"/scripts/secret-fetch "$DEST"/scripts/redacted-cat "$DEST"/scripts/sync_gitleaks.py "$DEST"/scripts/cursor_adapter.py 2>/dev/null || true
 HOOK_PY="$DEST/scripts/secret_guard.py"
 
+# Shared by the config merges below: refuse to touch a file that does not
+# parse, and replace it atomically, keeping the original as <file>.bak.
+IFS= read -r -d '' PY_IO <<'PY' || true
+import json, os, shutil, sys
+def load(path, default):
+    if not os.path.exists(path):
+        return default
+    with open(path) as f:
+        raw = f.read()
+    if not raw.strip():
+        return default
+    try:
+        return json.loads(raw)
+    except ValueError as e:
+        sys.exit(f"cannot parse {path} ({e}); add the snippet manually")
+def save(path, data):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    if os.path.exists(path):
+        shutil.copy2(path, path + ".bak")
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, path)
+PY
+CLAUDE_POST_MATCHER='Bash|Read|Grep|WebFetch|WebSearch|Task|Agent|mcp__.*'
+
 case "$TARGET" in
   claude)
     SETTINGS="$HOME/.claude/settings.json"
@@ -43,8 +70,8 @@ case "$TARGET" in
       cat <<SNIP
 {
   "hooks": {
-    "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "python3 $DEST/scripts/secret_guard.py", "timeout": 10}]}],
-    "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "python3 $DEST/scripts/secret_guard.py", "timeout": 10}]}]
+    "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "python3 $DEST/scripts/secret_guard.py", "timeout": 10, "onFailure": "block"}]}],
+    "PostToolUse": [{"matcher": "$CLAUDE_POST_MATCHER", "hooks": [{"type": "command", "command": "python3 $DEST/scripts/secret_guard.py", "timeout": 10}]}]
   }
 }
 SNIP
@@ -52,24 +79,25 @@ SNIP
       echo "auto-merge? [y/N] "
       read -r ans
       if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
-        python3 - <<PYEOF "$SETTINGS" "$DEST"
-import json, sys, os
-path, dest = sys.argv[1], sys.argv[2]
-data = {}
-if os.path.exists(path):
-    try: data = json.load(open(path))
-    except: data = {}
+        python3 - <<PYEOF "$SETTINGS" "$DEST" "$CLAUDE_POST_MATCHER"
+$PY_IO
+path, dest, post_matcher = sys.argv[1], sys.argv[2], sys.argv[3]
+data = load(path, {})
 data.setdefault("hooks", {})
-hook = {"type": "command", "command": f"python3 {dest}/scripts/secret_guard.py", "timeout": 10}
-for ev in ("PreToolUse", "PostToolUse"):
+cmd = f"python3 {dest}/scripts/secret_guard.py"
+wiring = {
+    "PreToolUse": ("*", {"type": "command", "command": cmd, "timeout": 10, "onFailure": "block"}),
+    "PostToolUse": (post_matcher, {"type": "command", "command": cmd, "timeout": 10}),
+}
+for ev, (matcher, hook) in wiring.items():
     arr = data["hooks"].setdefault(ev, [])
-    grp = next((g for g in arr if g.get("matcher") == "*"), None)
+    grp = next((g for g in arr if g.get("matcher") == matcher), None)
     if grp is None:
-        grp = {"matcher": "*", "hooks": []}
+        grp = {"matcher": matcher, "hooks": []}
         arr.append(grp)
     if hook not in grp["hooks"]:
         grp["hooks"].append(hook)
-json.dump(data, open(path, "w"), indent=2)
+save(path, data)
 print(f"merged into {path}")
 PYEOF
       fi
@@ -87,16 +115,13 @@ PYEOF
       read -r ans
       if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
         python3 - <<PYEOF "$OC_CONFIG" "$SNIP_TGT"
-import json, sys, os
+$PY_IO
 path, tgt = sys.argv[1], sys.argv[2]
-data = {}
-if os.path.exists(path):
-    try: data = json.load(open(path))
-    except: data = {}
+data = load(path, {})
 data.setdefault("plugin", [])
 if tgt not in data["plugin"]:
     data["plugin"].append(tgt)
-json.dump(data, open(path, "w"), indent=2)
+save(path, data)
 print(f"merged into {path}")
 PYEOF
       fi
@@ -111,20 +136,17 @@ PYEOF
       echo "cursor hooks.json already wires secret-guard"
     else
       python3 - <<PYEOF "$CURSOR_HOOKS" "$DEST/scripts/cursor_adapter.py"
-import json, os, sys
+$PY_IO
 path, adapter = sys.argv[1], sys.argv[2]
-data = {"version": 1, "hooks": {}}
-if os.path.exists(path):
-    try: data = json.load(open(path))
-    except: pass
+data = load(path, {"version": 1, "hooks": {}})
 data.setdefault("version", 1)
 data.setdefault("hooks", {})
 cmd = f"python3 {adapter}"
-data["hooks"].setdefault("preToolUse", []).append({"command": cmd, "matcher": ".*", "timeout": 10})
+data["hooks"].setdefault("preToolUse", []).append({"command": cmd, "matcher": ".*", "timeout": 10, "failClosed": True})
 data["hooks"].setdefault("postToolUse", []).append({"command": cmd, "matcher": ".*", "timeout": 10})
 for ev in ("beforeShellExecution", "beforeReadFile", "beforeMCPExecution"):
-    data["hooks"].setdefault(ev, []).append({"command": cmd, "timeout": 10})
-json.dump(data, open(path, "w"), indent=2)
+    data["hooks"].setdefault(ev, []).append({"command": cmd, "timeout": 10, "failClosed": True})
+save(path, data)
 print(f"merged secret-guard into {path}")
 PYEOF
     fi
@@ -137,12 +159,9 @@ PYEOF
       echo "codex hooks.json already wires secret-guard"
     else
       python3 - <<PYEOF "$CODEX_HOOKS" "$DEST/scripts/secret_guard.py"
-import json, os, sys
+$PY_IO
 path, script = sys.argv[1], sys.argv[2]
-data = {"hooks": {}}
-if os.path.exists(path):
-    try: data = json.load(open(path))
-    except: pass
+data = load(path, {"hooks": {}})
 data.setdefault("hooks", {})
 cmd = f"python3 {script}"
 entry = {
@@ -151,7 +170,7 @@ entry = {
 }
 for ev in ("PreToolUse", "PostToolUse"):
     data["hooks"].setdefault(ev, []).append(entry)
-json.dump(data, open(path, "w"), indent=2)
+save(path, data)
 print(f"merged secret-guard into {path}")
 print("codex: hooks need one-time trust review — run codex and accept the prompt, or use --dangerously-bypass-hook-trust.")
 PYEOF
@@ -215,12 +234,9 @@ elif [ "$TARGET" = "devin" ]; then
     echo "devin config.json already wires secret-guard"
   else
     python3 - <<PYEOF "$DEVIN_CFG" "$DEST/scripts/secret_guard.py"
-import json, os, sys
+$PY_IO
 path, script = sys.argv[1], sys.argv[2]
-data = {}
-if os.path.exists(path):
-    try: data = json.load(open(path))
-    except: data = {}
+data = load(path, {})
 data.setdefault("hooks", {})
 entry = {
     "matcher": "exec|edit",
@@ -230,11 +246,11 @@ for ev in ("PreToolUse", "PostToolUse"):
     data["hooks"].setdefault(ev, [])
     if not any(e.get("matcher") == "exec|edit" for e in data["hooks"][ev]):
         data["hooks"][ev].append(entry)
-json.dump(data, open(path, "w"), indent=2)
+save(path, data)
 print(f"merged secret-guard into {path}")
 PYEOF
   fi
-elif [ "$TARGET" != "claude" ] && [ "$TARGET" != "opencode" ] && [ "$TARGET" != "cursor" ] && [ "$TARGET" != "codex" ] && [ "$TARGET" != "omp" ]; then
+elif [ "$TARGET" = "droid" ]; then
   HOOKS_JSON="$(dirname "$DEST")/hooks.json"
   if [ ! -f "$HOOKS_JSON" ]; then
     cat > "$HOOKS_JSON" <<EOF
@@ -270,6 +286,10 @@ EOF
     echo "kept existing $HOOKS_JSON (edit manually if hooks aren't wired)"
   fi
 fi
+
+case "$TARGET" in
+  /*|./*) echo "custom dir: wire python3 $DEST/scripts/secret_guard.py into your agent's PreToolUse/PostToolUse hooks" ;;
+esac
 
 echo "installed secret-guard → $DEST"
 echo "verify:  python3 $DEST/tests/test_secret_guard.py"
