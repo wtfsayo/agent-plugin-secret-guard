@@ -478,6 +478,26 @@ class ClaudeCode(unittest.TestCase):
             {"old_string": "a", "new_string": "b"}]}))
         self.assertEqual(decision(r), "allow", r.stdout)
 
+    def _post(self, tool, response):
+        return run_guard({"hook_event_name": "PostToolUse", "tool_name": tool,
+                          "tool_input": {}, "session_id": "t",
+                          "tool_response": response})
+
+    def test_post_bash_stdout_leak(self):
+        r = self._post("Bash", {"stdout": f"key={SK}", "stderr": "",
+                                "interrupted": False, "isImage": False})
+        self.assertEqual(decision(r), "context", r.stdout)
+
+    def test_post_read_file_content_leak(self):
+        r = self._post("Read", {"type": "text", "file": {
+            "filePath": "/tmp/f", "content": f"token: {GHP}"}})
+        self.assertEqual(decision(r), "context", r.stdout)
+
+    def test_post_bash_plain(self):
+        r = self._post("Bash", {"stdout": "On branch main", "stderr": "",
+                                "interrupted": False, "isImage": False})
+        self.assertEqual(decision(r), "allow", r.stdout)
+
 
 class ExecOpCaptureForms(unittest.TestCase):
     def check(self, cmd, expect):

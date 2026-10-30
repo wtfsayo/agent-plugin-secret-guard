@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/secret_guard.py",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/secret_guard.py\"",
             "timeout": 10
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/secret_guard.py",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/secret_guard.py\"",
             "timeout": 10
           }
         ]

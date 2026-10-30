@@ -1,0 +1,26 @@
+{
+  "name": "secret-guard",
+  "version": "1.0.0",
+  "description": "Plugin for CLI agents — credential leak prevention via PreToolUse + PostToolUse hooks that block secret-leaking commands (cat .env, op --reveal, aws secretsmanager, gh auth token, kubectl secrets) and warn on output that already leaked. Works with Droid, Devin, Claude Code, opencode, Grok, Cursor, Codex, and omp.",
+  "author": {
+    "name": "Sayo",
+    "url": "https://github.com/wtfsayo"
+  },
+  "homepage": "https://github.com/wtfsayo/agent-plugin-secret-guard",
+  "repository": "https://github.com/wtfsayo/agent-plugin-secret-guard",
+  "license": "MIT",
+  "keywords": [
+    "secrets",
+    "secret-leaking",
+    "credential-guard",
+    "api-key-safety",
+    "agent-security",
+    "agent-hooks",
+    "pretooluse",
+    "posttooluse",
+    "claude-code",
+    "dotenv-protection",
+    "ai-agent-security"
+  ],
+  "hooks": "./extensions/com.anthropic.claude/hooks.settings.json"
+}
